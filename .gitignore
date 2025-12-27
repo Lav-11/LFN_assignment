@@ -1,3 +1,4 @@
 
 .vscode/
 lfn_venv/
+__pycache__/
