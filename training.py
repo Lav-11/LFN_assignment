@@ -3,6 +3,101 @@ import torch
 import torch.nn.functional as F
 from sklearn.metrics import f1_score, classification_report
 
+def eval_polarity(model, loader, device, report=False):
+    """
+    Evaluate the model on the polarity prediction task.
+    Args:
+        model: The GNN model.
+        loader: DataLoader for the dataset.
+        device: Device to run the model on.
+        report: Whether to return a classification report.
+    Returns:
+        The macro F1 score and a classification report (if report=True).
+    """
+    model.eval()
+    y_true_all, y_pred_all = [], []
+
+    with torch.no_grad():
+        for batch in loader:
+            batch = batch.to(device)
+            pol_logits = model(batch)
+
+            y_true_all.append(batch.edge_label.cpu())
+            y_pred_all.append(pol_logits.argmax(dim=1).cpu())
+
+    y_true = torch.cat(y_true_all).numpy()
+    y_pred = torch.cat(y_pred_all).numpy()
+    macro_f1 = f1_score(y_true, y_pred, average="macro")
+    if report:
+        report = classification_report(y_true, y_pred, target_names=["Oppose", "Neutral", "Support"], digits=2)
+    else:
+        report = None
+    return macro_f1, (y_true, y_pred), report
+
+def train_polarity_only(model, optimizer, train_loader, val_loader, device, patience, pol_weights=None, num_epochs=50):
+    """
+    Train the model using the polarity loss only.
+    Args:
+        model: The GNN model.
+        optimizer: The optimizer.
+        train_loader: DataLoader for training.
+        val_loader: DataLoader for validation.
+        device: Device to run the model on.
+        patience: Patience for early stopping.
+        pol_weights: Optional weights for polarity prediction loss.
+        num_epochs: Maximum number of epochs.
+    Returns:
+        The trained model (with best state loaded).
+    """    
+    best_f1 = -1.0
+    best_state = None
+    bad_epochs = 0
+    
+    for epoch in range(num_epochs):
+        model.train()
+        total_loss, total_ex = 0.0 ,0
+        
+        for batch in train_loader:
+            batch = batch.to(device)
+            optimizer.zero_grad()
+
+            y_pred = model(batch)
+            y_true = batch.edge_label
+
+            # Polarity loss
+            loss_pol = F.cross_entropy(y_pred, y_true, weight=pol_weights)
+
+            loss_pol.backward()
+            optimizer.step()
+
+            batch_size = y_true.size(0)
+            total_loss += loss_pol.item() * batch_size
+            total_ex += batch_size
+
+        train_loss = total_loss / total_ex
+
+        # Validation (polarity only)
+        val_f1, _, _ = eval_polarity(model, val_loader, device, report=False)
+        print(f"Epoch {epoch:02d} | Loss(avg): {train_loss:.4f} | Val macro-F1: {val_f1:.4f}")
+
+        if val_f1 > best_f1 + 1e-4:
+            best_f1 = val_f1
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            bad_epochs = 0
+        else:
+            bad_epochs += 1
+            if bad_epochs >= patience:
+                print(f"Early stopping. Best Val macro-F1: {best_f1:.4f}")
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+        model.to(device)
+        print(f"Loaded best model with F1: {best_f1:.4f}")
+        
+    return model
+
+
 def eval_hierarchical(model, loader, device, report=False):
     """
     Evaluate on a loader built over the 4-class dataset (pos+neg edges).
@@ -73,19 +168,17 @@ def eval_hierarchical(model, loader, device, report=False):
 def train_hierarchical(model, optimizer, train_loader, val_loader, device, patience, lambda_pol, link_weights=None, pol_weights=None, num_epochs=50):
     """
     Train the model using the hierarchical loss (link + polarity).
-    
     Args:
         model: The GNN model.
-        device: Device to run the model on.
-        patience: Patience for early stopping.
-        lambda_pol: Weight for polarity loss.
         optimizer: The optimizer.
         train_loader: DataLoader for training.
         val_loader: DataLoader for validation.
+        device: Device to run the model on.
+        patience: Patience for early stopping.
+        lambda_pol: Weight for polarity loss.
         link_weights: Optional weights for link prediction loss.
         pol_weights: Optional weights for polarity prediction loss.
         num_epochs: Maximum number of epochs.
-        
     Returns:
         The trained model (with best state loaded).
     """    
@@ -121,9 +214,9 @@ def train_hierarchical(model, optimizer, train_loader, val_loader, device, patie
             loss.backward()
             optimizer.step()
 
-            bs = y_true_4.size(0)
-            total_loss += loss.item() * bs
-            total_ex += bs
+            batch_size = y_true_4.size(0)
+            total_loss += loss.item() * batch_size
+            total_ex += batch_size
 
         train_loss = total_loss / total_ex
 
