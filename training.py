@@ -2,6 +2,7 @@
 import torch
 import torch.nn.functional as F
 from sklearn.metrics import f1_score, classification_report
+import os
 
 def eval_polarity(model, loader, device, report=False):
     """
@@ -34,7 +35,7 @@ def eval_polarity(model, loader, device, report=False):
         report = None
     return macro_f1, (y_true, y_pred), report
 
-def train_polarity_only(model, optimizer, train_loader, val_loader, device, patience, pol_weights=None, num_epochs=50):
+def train_polarity_only(model, optimizer, train_loader, val_loader, device, patience, pol_weights=None, num_epochs=50, checkpoint_path=None):
     """
     Train the model using the polarity loss only.
     Args:
@@ -84,6 +85,16 @@ def train_polarity_only(model, optimizer, train_loader, val_loader, device, pati
             best_f1 = val_f1
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             bad_epochs = 0
+
+            if checkpoint_path is not None:
+                save_checkpoint(
+                    checkpoint_path,
+                    model=model,
+                    optimizer=optimizer,
+                    epoch=epoch,
+                    best_metric=best_f1,
+                    model_state=best_state
+                )
         else:
             bad_epochs += 1
             if bad_epochs >= patience:
@@ -165,7 +176,7 @@ def eval_hierarchical(model, loader, device, report=False):
 
     return macro_f1_4, link_f1, pol_macro_f1, (y_true_4, y_pred_4), pol_report
 
-def train_hierarchical(model, optimizer, train_loader, val_loader, device, patience, lambda_pol, link_weights=None, pol_weights=None, num_epochs=50):
+def train_hierarchical(model, optimizer, train_loader, val_loader, device, patience, lambda_pol, link_weights=None, pol_weights=None, num_epochs=50, checkpoint_path=None):
     """
     Train the model using the hierarchical loss (link + polarity).
     Args:
@@ -228,6 +239,16 @@ def train_hierarchical(model, optimizer, train_loader, val_loader, device, patie
             best_f1 = val_macro_f1_4
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             bad_epochs = 0
+
+            if checkpoint_path is not None:
+                save_checkpoint(
+                    checkpoint_path,
+                    model=model,
+                    optimizer=optimizer,
+                    epoch=epoch,
+                    best_metric=best_f1,
+                    model_state=best_state
+                )
         else:
             bad_epochs += 1
             if bad_epochs >= patience:
@@ -240,3 +261,21 @@ def train_hierarchical(model, optimizer, train_loader, val_loader, device, patie
         print(f"Loaded best model with F1(4): {best_f1:.4f}")
         
     return model
+
+def save_checkpoint(path, model, optimizer=None, epoch=None, best_metric=None, model_state=None):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    ckpt = {
+        "model_state": model_state if model_state is not None else model.state_dict(),
+        "epoch": epoch,
+        "best_metric": best_metric,
+    }
+    if optimizer is not None:
+        ckpt["optimizer_state"] = optimizer.state_dict()
+    torch.save(ckpt, path)
+
+def load_checkpoint(path, model, optimizer=None, map_location="cpu"):
+    ckpt = torch.load(path, map_location=map_location)
+    model.load_state_dict(ckpt["model_state"])
+    if optimizer is not None and "optimizer_state" in ckpt:
+        optimizer.load_state_dict(ckpt["optimizer_state"])
+    return ckpt
