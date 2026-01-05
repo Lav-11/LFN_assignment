@@ -1,11 +1,17 @@
-import gzip
-import locale
+# Import standard libraries
+import gzip, sys, locale, random
+from pathlib import Path
 from datetime import datetime
 from typing import List, Tuple, Dict, Union
-
-import torch
-import random
 from collections import defaultdict
+# Computations
+import torch
+import numpy as np
+# Import this project modules
+REPO_ROOT = Path('.').resolve()
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from utility import sum_months
 
 locale.setlocale(locale.LC_TIME, 'C')
 
@@ -174,3 +180,37 @@ class CandidateCentricSampler:
         y_neg = torch.zeros(X_neg.size(0), dtype=torch.long) # 0 = NoVote
         
         return X_neg, y_neg
+
+
+def train_val_test_split_by_date(X: torch.Tensor, y: torch.Tensor, dates: np.ndarray, val_months:int=6, test_months:int=6):
+    """
+    Splits the dataset into train, validation, and test sets based on dates.
+    Args:
+        X (torch.Tensor): Tensor of shape (num_samples, 2) with edges (u, v).
+        y (torch.Tensor): Tensor of shape (num_samples,) with labels (1=Vote, 0=NoVote).
+        dates (np.ndarray): Tensor of shape (num_samples,) with dates in YYYYMMDD format.
+        val_months (int): Number of months for the validation set.
+        test_months (int): Number of months for the test set.
+    Returns:
+        splits (tuple): A tuple containing three tuples:
+        - (X_train, y_train, dates_train)
+        - (X_val, y_val, dates_val)
+        - (X_test, y_test, dates_test)
+    """
+    last_date = max(dates)
+
+    # Calculate split dates
+    val_start_date = sum_months(last_date, - (val_months + test_months))
+    test_start_date = sum_months(last_date, - test_months)
+
+    # Create boolean masks
+    mask_train = dates < val_start_date
+    mask_val = (dates >= val_start_date) & (dates < test_start_date)
+    mask_test = dates >= test_start_date
+    
+    # Split the data
+    X_train, y_train, dates_train = X[mask_train], y[mask_train], dates[mask_train]
+    X_val, y_val, dates_val = X[mask_val], y[mask_val], dates[mask_val]
+    X_test, y_test, dates_test = X[mask_test], y[mask_test], dates[mask_test]
+
+    return (X_train, y_train, dates_train), (X_val, y_val, dates_val), (X_test, y_test, dates_test)
