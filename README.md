@@ -30,4 +30,9 @@ Di seguito sono elencate le principali modifiche e aggiunte apportate alla codeb
     $$ h_i^{(l+1)} = \sigma \left( W_{fwd} \cdot \text{agg}(\{h_j^{(l)}, j \in \mathcal{N}_{in}(i)\}) + W_{bwd} \cdot \text{agg}(\{h_k^{(l)}, k \in \mathcal{N}_{out}(i)\}) \right) $$
 
     Quindi impara dei pesi diversi per i messaggi in entrata e uscenti.
-  
+
+## Commit: Implemented Focal Loss (January 7, 2026)
+Di seguito le modifiche introdotte per migliorare la gestione del bilanciamento delle classi:
+
+- **Implementazione Focal Loss**: Nel modulo `training.py` è stata aggiunta la classe `FocalLoss`. Questa funzione di perdita è progettata per gestire dataset sbilanciati attribuendo un peso maggiore agli esempi difficili da classificare, riducendo l'influenza dei campioni "facili" (spesso la classe maggioritaria).
+- **Integrazione nel Training**: La funzione `train_polarity_only` è stata aggiornata per accettare un argomento `loss_fn`, permettendo di passare dinamicamente funzioni di costo custom come la Focal Loss al posto della standard Cross Entropy.  

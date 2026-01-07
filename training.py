@@ -1,8 +1,25 @@
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import f1_score, classification_report
 import os
+
+class FocalLoss(torch.nn.Module):
+    def __init__(self, weight=None, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.weight = weight 
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, input, target):
+        ce_loss = F.cross_entropy(input, target, weight=self.weight, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+        
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        return focal_loss.sum()
 
 def eval_polarity(model, loader, device, report=False):
     """
@@ -35,18 +52,19 @@ def eval_polarity(model, loader, device, report=False):
         report = None
     return macro_f1, (y_true, y_pred), report
 
-def train_polarity_only(model, optimizer, train_loader, val_loader, device, patience, pol_weights=None, num_epochs=50, checkpoint_path=None):
+def train_polarity_only(model, optimizer, loss_fn, train_loader, val_loader, device, patience, num_epochs=50, checkpoint_path=None):
     """
     Train the model using the polarity loss only.
     Args:
         model: The GNN model.
         optimizer: The optimizer.
+        loss_fn: The loss function.
         train_loader: DataLoader for training.
         val_loader: DataLoader for validation.
         device: Device to run the model on.
         patience: Patience for early stopping.
-        pol_weights: Optional weights for polarity prediction loss.
         num_epochs: Maximum number of epochs.
+        checkpoint_path: Path to save the best model.
     Returns:
         The trained model (with best state loaded).
     """    
@@ -66,7 +84,7 @@ def train_polarity_only(model, optimizer, train_loader, val_loader, device, pati
             y_true = batch.edge_label
 
             # Polarity loss
-            loss_pol = F.cross_entropy(y_pred, y_true, weight=pol_weights)
+            loss_pol = loss_fn(y_pred, y_true)
 
             loss_pol.backward()
             optimizer.step()
