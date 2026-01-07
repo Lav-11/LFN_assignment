@@ -40,7 +40,7 @@ def analyze_split_statistics(X_train, y_train, X_val, y_val, X_test, y_test):
     """
     
     # --- CONFIGURAZIONE ---
-    class_map = {1: "Oppose (-1)", 2: "Neutral (0)", 3: "Support (1)"}
+    class_map = {0: "Oppose (-1)", 1: "Neutral (0)", 2: "Support (1)"}
     
     splits = {
         "Train": (X_train, y_train),
@@ -144,19 +144,35 @@ def analyze_split_statistics(X_train, y_train, X_val, y_val, X_test, y_test):
         df_list.append(temp_df)
     df_all = pd.concat(df_list)
 
-    # Compute percentages to normalize the bars
-    props = df_all.groupby("Split")['Class Name'].value_counts(normalize=True).rename("Percentage").reset_index()
-    props['Percentage'] *= 100
+    # Compute counts and percentages
+    counts = df_all.groupby(["Split", "Class Name"]).size().rename("Count").reset_index()
+    totals = df_all.groupby("Split").size().rename("Total").reset_index()
+    props = pd.merge(counts, totals, on="Split")
+    props['Percentage'] = (props['Count'] / props['Total']) * 100
     
-    # Order the splits logically
+    # Order the splits and classes logically
     props['Split'] = pd.Categorical(props['Split'], categories=['Train', 'Val', 'Test'], ordered=True)
+    class_order = ["Oppose (-1)", "Neutral (0)", "Support (1)"]
     
-    sns.barplot(data=props, x='Split', y='Percentage', hue='Class Name', ax=ax_dist, palette="viridis")
+    sns.barplot(data=props, x='Split', y='Percentage', hue='Class Name', ax=ax_dist, palette="viridis", hue_order=class_order)
     
+    # Add count annotations
+    for i, container in enumerate(ax_dist.containers):
+        c_name = class_order[i]
+        labels = []
+        for split_name in ['Train', 'Val', 'Test']:
+            row = props[(props['Split'] == split_name) & (props['Class Name'] == c_name)]
+            if not row.empty:
+                count_val = row.iloc[0]['Count']
+                labels.append(f"{count_val}")
+            else:
+                labels.append("0")
+        ax_dist.bar_label(container, labels=labels, padding=3)
+
     ax_dist.set_title("Label Shift Check (Class Distribution)", fontsize=14, fontweight='bold')
     ax_dist.set_ylabel("Percentage (%)")
-    ax_dist.set_ylim(0, 100)
-    ax_dist.legend(title="Classes", bbox_to_anchor=(1.02, 1), loc='upper left')
+    ax_dist.set_ylim(0, 115)
+    ax_dist.legend(title="Classes (Count)", bbox_to_anchor=(1.02, 1), loc='upper left')
     
     plt.tight_layout()
     plt.show()

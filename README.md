@@ -18,5 +18,16 @@ Di seguito sono elencate le principali modifiche e aggiunte apportate alla codeb
 - **Estensione Training (Polarity-Only)**: Il modulo `training.py` è stato arricchito con le funzioni `train_polarity_only` ed `eval_polarity`. Queste permettono di addestrare e valutare il modello focalizzandosi esclusivamente sulla predizione della polarità (3 classi), disaccoppiando questo task dalla link prediction gerarchica.
 - **Approccio Transduttivo**: È stato aggiunto il notebook `gnn_implementation_transductive.ipynb`. Questo introduce un'implementazione GNN transduttiva che lavora sull'intero grafo statico mascherato, offrendo un'alternativa all'approccio induttivo e sliding-window precedentemente implementato.
 
-#### Todo
-- Verificare che GraphSAGE e il message passing funzionino correttamente per il grafo diretto.
+
+## Commit: Heterogeneous Graph Transformation (January 6, 2026)
+Di seguito sono elencate le principali modifiche e aggiunte apportate alla codebase:
+
+- **Trasformazione in Grafo Eterogeneo**: Il notebook `gnn_implementation_transductive` è stato aggiornato trasformando il grafo in una struttura eterogenea (`HeteroData`).
+  - **Perché questa scelta?** Essendo Wiki-RfA un grafo diretto (chi vota ≠ chi riceve il voto), trattarlo come omogeneo con GNN standard (o non dirette) rischia di perdere informazioni cruciali sulla direzione dell'influenza.
+  - **Come funziona**: Utilizzando una rappresentazione eterogenea, il modello può differenziare esplicitamente i ruoli di sorgente (voter) e destinazione (candidate), apprendendo pesi diversi per i messaggi uscenti e in entrata. Questo cattura meglio la dinamica "Voter -> Vote -> Candidate" rispetto a un semplice approccio non diretto.
+    
+    Matematicamente, per un nodo $i$, l'aggiornamento diventa:
+    $$ h_i^{(l+1)} = \sigma \left( W_{fwd} \cdot \text{agg}(\{h_j^{(l)}, j \in \mathcal{N}_{in}(i)\}) + W_{bwd} \cdot \text{agg}(\{h_k^{(l)}, k \in \mathcal{N}_{out}(i)\}) \right) $$
+
+    Quindi impara dei pesi diversi per i messaggi in entrata e uscenti.
+  
