@@ -7,6 +7,7 @@ from collections import defaultdict
 # Computations
 import torch
 import numpy as np
+import pandas as pd
 # Import this project modules
 REPO_ROOT = Path('.').resolve()
 if REPO_ROOT not in sys.path:
@@ -214,3 +215,66 @@ def train_val_test_split_by_date(X: torch.Tensor, y: torch.Tensor, dates: np.nda
     X_test, y_test, dates_test = X[mask_test], y[mask_test], dates[mask_test]
 
     return (X_train, y_train, dates_train), (X_val, y_val, dates_val), (X_test, y_test, dates_test)
+
+def extract_node_features(edge_index: torch.Tensor, edge_dates: np.ndarray, num_nodes: int) -> torch.Tensor:
+    """
+    Compute structural and temporal features for nodes in a dynamic graph.
+    
+    Args:
+        edge_index (torch.Tensor): [2, E] Source (Voter) -> Target (Candidate)
+        edge_dates (np.ndarray): [E] Dates in YYYYMMDD format (int)
+        num_nodes (int): Total number of nodes in the graph
+    Returns:
+        torch.Tensor: [num_nodes, 6] Normalized feature matrix
+    """
+    
+    # Conversion: YYYYMMDD to Timestamp Linear (days)
+    dates_pd = pd.to_datetime(edge_dates, format='%Y%m%d')
+    ref_date = pd.to_datetime(edge_dates.max(), format='%Y%m%d')
+    
+    df = pd.DataFrame({
+        'src': edge_index[0].cpu().numpy(),
+        'tgt': edge_index[1].cpu().numpy(),
+        'date': dates_pd
+    })
+    
+    # Initialize features to 0 ----> [In-Deg, Out-Deg, Tenure, Recency, Span, Freq]
+    features = np.zeros((num_nodes, 6), dtype=np.float32)
+    
+    # ---------------------------------------------------------
+    # 1. Structural Features (Degrees)
+    # ---------------------------------------------------------
+    in_degree = df.groupby('tgt').size()
+    out_degree = df.groupby('src').size()
+    
+    features[in_degree.index, 0] = in_degree.values  # In-Degree (Votes Received)
+    features[out_degree.index, 1] = out_degree.values # Out-Degree (Votes Given)
+
+    # ---------------------------------------------------------
+    # 2. Temporal Features (Tenure, Recency, Span)
+    # ---------------------------------------------------------
+    # Group by SRC (Voter) to calculate T_first_vote and T_last_vote
+    grp_src = df.groupby('src')['date'].agg(['min', 'max'])
+    
+    voter_indices = grp_src.index.values
+    t_first = grp_src['min']
+    t_last = grp_src['max']
+    
+    # (.dt.days converts Timedelta to int)
+    features[voter_indices, 2] = (ref_date - t_first).dt.days.values   # Tenure (Anzianità): T_now - T_first
+    features[voter_indices, 3] = (ref_date - t_last).dt.days.values    # Recency (Recenza): T_now - T_last
+    features[voter_indices, 4] = (t_last - t_first).dt.days.values     # Activity Span: T_last - T_first
+    
+    # ---------------------------------------------------------
+    # 3. Derived Features (Frequency)
+    # ---------------------------------------------------------
+    # Add 1 day to span to avoid division by zero     
+    safe_span = features[voter_indices, 4] + 1.0 
+    votes_given = features[voter_indices, 1]
+    
+    features[voter_indices, 5] = votes_given / safe_span
+
+    # ---------------------------------------------------------
+    # 4. Logarithmic Normalization (Critical for Neural Networks)
+    # ---------------------------------------------------------   
+    return torch.tensor(np.log1p(features), dtype=torch.float)
