@@ -4,81 +4,64 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import SAGEConv, to_hetero
 
-class HeteroPolarityGNN(torch.nn.Module):
-    def __init__(self, num_nodes, metadata, emb_dim=64, hidden_dim=256, out_dim=3, dropout=0.2):
-        """
-        GNN for Vote Polarity Prediction using ONLY Learnable Embeddings (No manual features).
-        
-        Args:
-            num_nodes (int): Total number of unique users (for Embedding layer).
-            metadata (tuple): Graph metadata (node_types, edge_types).
-            emb_dim (int): Dimension of learnable node embeddings.
-            hidden_dim (int): Hidden dimension size for GNN layers.
-            out_dim (int): Number of output classes (3 for Oppose/Neutral/Support).
-            dropout (float): Dropout probability.
-        """
+# Define the GraphSAGE model with a GNN encoder and an edge-level head.
+class HeteroPolarityGNN(nn.Module):
+    def __init__(self, metadata, num_users, emb_dim=64, hidden_dim=128, dropout=0.3):
         super().__init__()
-        self.dropout = dropout
-        
-        # 1. Learnable Node Embeddings (The only source of node features)
-        self.node_emb = nn.Embedding(num_nodes, emb_dim)
-        
-        # 2. GNN Backbone (Encoder)
-        class GraphSAGE_Encoder(torch.nn.Module):
-            def __init__(self, in_dim, hidden_dim, dropout):
-                super().__init__()
-                # Layer 1: emb_dim -> hidden_dim
-                self.conv1 = SAGEConv((-1, -1), hidden_dim)
-                # Layer 2: hidden_dim -> hidden_dim
-                self.conv2 = SAGEConv((-1, -1), hidden_dim)
-                self.dropout = dropout
 
+        self.node_emb = nn.Embedding(num_users, emb_dim)
+        
+        # Base Homogeneous GAT
+        class BaseGNN(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dropout = nn.Dropout(p=dropout) 
+                self.conv1 = SAGEConv(emb_dim, hidden_dim)
+                self.conv2 = SAGEConv(hidden_dim, hidden_dim)
             def forward(self, x, edge_index):
+                x = self.dropout(x)
                 x = self.conv1(x, edge_index)
                 x = F.relu(x)
-                x = F.dropout(x, p=self.dropout, training=self.training)
+                x = self.dropout(x)
                 x = self.conv2(x, edge_index)
+                x = F.relu(x)
                 return x
-
-        # Transform homogeneous GNN to heterogeneous
-        # We pass 'emb_dim' as input dimension to the encoder
-        self.gnn = to_hetero(GraphSAGE_Encoder(emb_dim, hidden_dim, dropout), metadata, aggr='mean')
         
-        # 3. Edge Classifier
-        # Takes concatenated embeddings of source and target nodes (2 * hidden_dim)
-        self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
+        # Convert to Hetero GNN
+        self.hetero_gnn = to_hetero(BaseGNN(), metadata, aggr='sum')
+        
+        edge_in = hidden_dim * 4
+        
+        # Head for polarity
+        self.pol_mlp = nn.Sequential(
+            nn.Linear(edge_in, 128),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, out_dim)
+            nn.Linear(128, 32),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(32, 3)
         )
 
     def forward(self, batch):
-        # 1. Retrieve Original Node IDs (mapped by LinkNeighborLoader)
+        # Dict for node embeddings
         n_id = batch['user'].n_id
-        
-        # 2. Lookup Embeddings (This is our initial 'x')
         x = self.node_emb(n_id) # [batch_nodes, emb_dim]
-        
-        # Note: We completely IGNORE batch['user'].x (manual features) here.
-        
-        # 3. Run GNN to get updated Node Embeddings (Message Passing)
+
         x_dict = {'user': x}
-        x_out_dict = self.gnn(x_dict, batch.edge_index_dict)
-        x_user = x_out_dict['user'] # [num_nodes_in_batch, hidden_dim]
         
-        # 4. Decode Edges for Classification
-        # Get source and target indices for the edges in the current batch
-        edge_label_index = batch['user', 'votes', 'user'].edge_label_index
-        src_idx = edge_label_index[0]
-        tgt_idx = edge_label_index[1]
+        # Learn GNN embeddings
+        z_dict = self.hetero_gnn(x_dict, batch.edge_index_dict)
         
-        x_src = x_user[src_idx]
-        x_tgt = x_user[tgt_idx]
+        src, tgt = batch[('user', 'votes', 'user')].edge_label_index
         
-        # Concatenate source and target embeddings
-        edge_feat = torch.cat([x_src, x_tgt], dim=-1)
+        # Get user embeddings
+        z = z_dict['user']
+        h_src = z[src]
+        h_tgt = z[tgt]
         
-        # Predict Class Logits
-        out = self.classifier(edge_feat)
-        return out
+        # Edge features
+        e = torch.cat([h_src, h_tgt, torch.abs(h_src - h_tgt), h_src * h_tgt], dim=1)
+        
+        # Predict
+        return self.pol_mlp(e)
