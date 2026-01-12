@@ -4,6 +4,37 @@ from matplotlib_venn import venn3
 import pandas as pd
 import seaborn as sns
 
+def plot_cm(cm, labels, title, normalize=False,
+            figsize=(4.2, 3.6), annot_size=12, tick_size=10, title_size=12):
+    if normalize:
+        cm_plot = cm.astype(float)
+        cm_plot = cm_plot / cm_plot.sum(axis=1, keepdims=True)
+        fmt = ".2f"
+    else:
+        cm_plot = cm.astype(int)   # <-- qui int
+        fmt = "d"
+
+    plt.figure(figsize=figsize)
+    ax = sns.heatmap(
+        cm_plot,
+        annot=True,
+        fmt=fmt,
+        cmap="Blues",
+        square=True,                 # celle quadrate
+        cbar=True,
+        xticklabels=labels,
+        yticklabels=labels,
+        annot_kws={"size": annot_size}  # numeri più grandi
+    )
+    ax.set_xlabel("Predicted", fontsize=tick_size)
+    ax.set_ylabel("True", fontsize=tick_size)
+    ax.set_title(title, fontsize=title_size)
+
+    ax.tick_params(axis="both", labelsize=tick_size)
+
+    plt.tight_layout()
+    plt.show()
+
 def sum_months(date: int, months: int) -> int:
     """
     Utility function to sum or subtract months to a date in YYYYMMDD format.
