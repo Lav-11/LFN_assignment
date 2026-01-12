@@ -214,6 +214,8 @@ def train_hierarchical(model, optimizer, train_loader, val_loader, device, patie
     best_f1 = -1.0
     best_state = None
     bad_epochs = 0
+
+    polarity_loss = FocalLoss(weight=pol_weights, gamma=1.0)
     
     for epoch in range(num_epochs):
         model.train()
@@ -235,7 +237,7 @@ def train_hierarchical(model, optimizer, train_loader, val_loader, device, patie
             pos_mask = (y_true_link == 1)
             if pos_mask.any():
                 y_true_pol = (y_true_4[pos_mask] - 1).long()  # {0,1,2}
-                loss_pol = F.cross_entropy(pol_logits[pos_mask], y_true_pol, weight=pol_weights)
+                loss_pol = polarity_loss(pol_logits[pos_mask], y_true_pol)
             else:
                 loss_pol = torch.tensor(0.0, device=device)
 

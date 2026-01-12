@@ -11,7 +11,7 @@ class HeteroPolarityGNN(nn.Module):
 
         self.node_emb = nn.Embedding(num_users, emb_dim)
         
-        # Base Homogeneous GAT
+        # Base Homogeneous GNN
         class BaseGNN(nn.Module):
             def __init__(self):
                 super().__init__()
