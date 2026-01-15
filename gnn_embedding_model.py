@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import SAGEConv, to_hetero
 
 # Define the GraphSAGE model with a GNN encoder and an edge-level head.
-class HeteroPolarityGNN(nn.Module):
+class HeteroGNN(nn.Module):
     def __init__(self, metadata, num_users, emb_dim=64, hidden_dim=128, dropout=0.3):
         super().__init__()
 
