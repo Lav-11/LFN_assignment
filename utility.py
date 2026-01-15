@@ -11,7 +11,7 @@ def plot_cm(cm, labels, title, normalize=False,
         cm_plot = cm_plot / cm_plot.sum(axis=1, keepdims=True)
         fmt = ".2f"
     else:
-        cm_plot = cm.astype(int)   # <-- qui int
+        cm_plot = cm.astype(int)
         fmt = "d"
 
     plt.figure(figsize=figsize)
@@ -20,11 +20,11 @@ def plot_cm(cm, labels, title, normalize=False,
         annot=True,
         fmt=fmt,
         cmap="Blues",
-        square=True,                 # celle quadrate
+        square=True,
         cbar=True,
         xticklabels=labels,
         yticklabels=labels,
-        annot_kws={"size": annot_size}  # numeri più grandi
+        annot_kws={"size": annot_size}
     )
     ax.set_xlabel("Predicted", fontsize=tick_size)
     ax.set_ylabel("True", fontsize=tick_size)

@@ -18,57 +18,57 @@ locale.setlocale(locale.LC_TIME, 'C')
 
 class WikiRfAPreprocessor:
     """
-    Gestisce il caricamento e il preprocessing del dataset Wiki-RfA.
-    L'obiettivo è estrarre archi (u, v) con attributi temporali e di voto
-    per costruire il grafo G=(V,E) definito nella proposta di progetto.
+    Handles loading and preprocessing of the Wiki-RfA dataset.
+    The goal is to extract edges (u, v) with temporal and vote attributes
+    to build the graph G=(V,E) defined in the project proposal.
     """
 
     def __init__(self, file_path: str):
-        # Inizializza il dataset con il percorso del file compresso.
+        # Initialize the dataset with the path to the compressed file.
         self.file_path = file_path
         self.samples: List[Tuple[str, str, int, int]] = []
         self.errors = {"EMPTY_ERROR": [], "SELF_LOOP": [], "ERROR_OTHERS": []}
 
     def _parse_date(self, date_str: str) -> Union[int, str]:
-        """ Converte la stringa data in intero YYYYMMDD. """
+        """Converts the date string to an integer in YYYYMMDD format."""
         if len(date_str) == 0:
             return "EMPTY_ERROR"
         
         formats_to_try = [
-            "%H:%M, %d %B %Y",  # Es: "23:13, 19 April 2013" (%B = mese completo)
-            "%H:%M, %d %b %Y"   # Es: "23:25, 15 Jan 2005"   (%b = mese abbreviato)
+            "%H:%M, %d %B %Y",  # e.g., "23:13, 19 April 2013" (%B = full month name)
+            "%H:%M, %d %b %Y"   # e.g., "23:25, 15 Jan 2005"   (%b = abbreviated month name)
         ]
         
         for fmt in formats_to_try:
             try:
-                # Trasform the string in an abject datetime
+                # Transform the string into a datetime object
                 dt_obj = datetime.strptime(date_str, fmt)
-                # Casting and reformatting
+                # Cast and reformat
                 return int(dt_obj.strftime("%Y%m%d"))
             except ValueError:
-                # If it fails, pass to the next format
+                # If it fails, move to the next format
                 continue
         
         return "ERROR_OTHERS"
     
     def _is_valid_block(self, block: Dict[str, str]) -> bool:
-        """ Verifica la presenza dei campi essenziali SRC, TGT, VOT, DAT. """
+        """Checks for the presence of the essential fields SRC, TGT, VOT, DAT."""
         required_keys = {"SRC", "TGT", "VOT", "DAT"}
         return required_keys.issubset(block.keys())
 
     def _process_block(self, block: Dict[str, str]) -> Union[Tuple, str]:
         """ 
-        Processa un blocco di linee e restituisce un dizionario con i campi chiave-valore.
-        Altrimenti restituisce la tipologia di errore.
+        Processes a block of lines and returns a tuple with key fields.
+        Otherwise, returns the corresponding error type.
         """
         # 1. Extract date and convert to integer YYYYMMDD
         date_str = block["DAT"].strip()
         int_date = self._parse_date(date_str)
         
-        if isinstance(int_date, str): # Se è tornato un errore (stringa)
+        if isinstance(int_date, str):  # If an error was returned (string)
             return int_date
         
-        # 2. Veryfy no self-loops
+        # 2. Verify no self-loops
         if block["SRC"] == block["TGT"]:
             return "SELF_LOOP"
 
@@ -76,7 +76,7 @@ class WikiRfAPreprocessor:
         return (block["SRC"], block["TGT"], int(block["VOT"]), int_date)
 
     def load(self, verbose: bool = False) -> None:
-        """Legge il file compresso e popola la lista self.samples."""
+        """Reads the compressed file and populates the self.samples list."""
         print(f"Loading dataset from {self.file_path}...")
         
         current_block = {}
@@ -85,12 +85,12 @@ class WikiRfAPreprocessor:
             for line_idx, line in enumerate(f):
                 line = line.strip()
                 
-                # Stampa le prime righe se richiesto (debug)
+                # Print the first lines if requested (debug)
                 if verbose and line_idx < 10:
                     print(f"Raw line {line_idx}: {line}")
 
                 if not line:
-                    # Fine del blocco: processiamo i dati accumulati
+                    # End of block: process the accumulated data
                     if self._is_valid_block(current_block):
                         result = self._process_block(current_block)
                         
@@ -100,20 +100,20 @@ class WikiRfAPreprocessor:
                         else:
                             self.samples.append(result)
                     
-                    current_block = {} # Reset
+                    current_block = {}  # Reset
                 else:
-                    # Accumulo dati nel blocco corrente
+                    # Accumulate data in the current block
                     try:
                         key, value = line.split(":", 1)
                         current_block[key] = value.strip()
                     except ValueError:
-                        continue # Gestione linee malformate
+                        continue  # Handle malformed lines
 
         print("\n" + "-" * 7 + " Dataset Loaded " + "-" * 7)
         self.print_stats()
 
     def print_stats(self):
-        """Stampa statistiche riassuntive del dataset."""
+        """Prints summary statistics for the dataset."""
         print(f"Total valid samples loaded: {len(self.samples)}")
         if self.samples:
             print(f"Example sample (SRC, TGT, VOT, DATE): {self.samples[0]}")
@@ -127,24 +127,24 @@ class WikiRfAPreprocessor:
 
 class CandidateCentricSampler:
     """
-    Gestisce il campionamento dei negativi (NoVote) preservando la distribuzione
-    dei candidati (Candidate-Centric).
+    Handles negative sampling (NoVote) while preserving the candidate distribution
+    (Candidate-Centric).
     
-    Logica:
-    Per ogni arco positivo (u, t) nel set corrente, campioniamo 'ratio' archi negativi (u', t)
-    tali che l'arco (u', t) non esista in NESSUNA partizione del dataset (Train/Val/Test).
+    Logic:
+    For each positive edge (u, t) in the current split, we sample 'ratio' negative edges (u', t)
+    such that the edge (u', t) does not exist in ANY dataset partition (Train/Val/Test).
     """
 
     def __init__(self, all_pos_tensors):
         """
         Args:
-            all_pos_tensors: lista di tensori [X_train, X_val, X_test].
-                Serve a costruire la mappa globale dei 'voti proibiti'.
+            all_pos_tensors: list of tensors [X_train, X_val, X_test].
+                Used to build the global 'forbidden votes' map.
         """
         self.global_forbidden = self._build_global_forbidden(all_pos_tensors)
 
     def _build_global_forbidden(self, tensor_list):
-        """Crea un dizionario {target_id: set(voter_ids)} unendo tutti gli split."""
+        """Creates a dict {target_id: set(voter_ids)} by merging all splits."""
         forbidden = defaultdict(set)
         for tensor in tensor_list:
             for u, t in tensor.tolist():
@@ -153,32 +153,32 @@ class CandidateCentricSampler:
 
     def sample_negatives(self, target_tensor, num_nodes, ratio=1, seed=42):
         """
-        Esegue il sampling per un dato tensore di input (es. X_train).
-        Restituisce (X_neg, y_neg).
+        Performs sampling for a given input tensor (e.g., X_train).
+        Returns (X_neg, y_neg).
         """
         rng = random.Random(seed)
-        targets = target_tensor[:, 1].tolist() # Prendiamo i candidati dagli archi positivi
+        targets = target_tensor[:, 1].tolist()  # Take candidates from positive edges
         
         X_neg_list = []
         
-        # Per ogni voto reale ricevuto dal candidato t, generiamo 'ratio' non-voti
+        # For each real vote received by candidate t, generate 'ratio' no-votes
         for t in targets:
             t_idx = int(t)
             forbidden_voters = self.global_forbidden[t_idx]
             
             for _ in range(ratio):
                 while True:
-                    # Campioniamo un utente casuale
+                    # Sample a random user
                     u_neg = rng.randrange(num_nodes)
                     
-                    # Accettiamo se l'utente non ha mai votato per questo candidato
-                    # (nemmeno nel futuro/test set) e non è un self-loop
+                    # Accept if the user never voted for this candidate
+                    # (not even in the future/test set) and it's not a self-loop
                     if u_neg not in forbidden_voters and u_neg != t_idx:
                         X_neg_list.append([u_neg, t_idx])
                         break
         
         X_neg = torch.tensor(X_neg_list, dtype=torch.long)
-        y_neg = torch.zeros(X_neg.size(0), dtype=torch.long) # 0 = NoVote
+        y_neg = torch.zeros(X_neg.size(0), dtype=torch.long)  # 0 = NoVote
         
         return X_neg, y_neg
 
@@ -228,7 +228,7 @@ def extract_node_features(edge_index: torch.Tensor, edge_dates: np.ndarray, num_
         torch.Tensor: [num_nodes, 6] Normalized feature matrix
     """
     
-    # Conversion: YYYYMMDD to Timestamp Linear (days)
+    # Conversion: YYYYMMDD to a linear timestamp (days)
     dates_pd = pd.to_datetime(edge_dates, format='%Y%m%d')
     ref_date = pd.to_datetime(edge_dates.max(), format='%Y%m%d')
     
@@ -247,13 +247,13 @@ def extract_node_features(edge_index: torch.Tensor, edge_dates: np.ndarray, num_
     in_degree = df.groupby('tgt').size()
     out_degree = df.groupby('src').size()
     
-    features[in_degree.index, 0] = in_degree.values  # In-Degree (Votes Received)
+    features[in_degree.index, 0] = in_degree.values   # In-Degree (Votes Received)
     features[out_degree.index, 1] = out_degree.values # Out-Degree (Votes Given)
 
     # ---------------------------------------------------------
     # 2. Temporal Features (Tenure, Recency, Span)
     # ---------------------------------------------------------
-    # Group by SRC (Voter) to calculate T_first_vote and T_last_vote
+    # Group by SRC (Voter) to compute T_first_vote and T_last_vote
     grp_src = df.groupby('src')['date'].agg(['min', 'max'])
     
     voter_indices = grp_src.index.values
@@ -261,20 +261,20 @@ def extract_node_features(edge_index: torch.Tensor, edge_dates: np.ndarray, num_
     t_last = grp_src['max']
     
     # (.dt.days converts Timedelta to int)
-    features[voter_indices, 2] = (ref_date - t_first).dt.days.values   # Tenure (Anzianità): T_now - T_first
-    features[voter_indices, 3] = (ref_date - t_last).dt.days.values    # Recency (Recenza): T_now - T_last
-    features[voter_indices, 4] = (t_last - t_first).dt.days.values     # Activity Span: T_last - T_first
+    features[voter_indices, 2] = (ref_date - t_first).dt.days.values  # Tenure: T_now - T_first
+    features[voter_indices, 3] = (ref_date - t_last).dt.days.values   # Recency: T_now - T_last
+    features[voter_indices, 4] = (t_last - t_first).dt.days.values    # Activity span: T_last - T_first
     
     # ---------------------------------------------------------
     # 3. Derived Features (Frequency)
     # ---------------------------------------------------------
-    # Add 1 day to span to avoid division by zero     
-    safe_span = features[voter_indices, 4] + 1.0 
+    # Add 1 day to span to avoid division by zero
+    safe_span = features[voter_indices, 4] + 1.0
     votes_given = features[voter_indices, 1]
     
     features[voter_indices, 5] = votes_given / safe_span
 
     # ---------------------------------------------------------
     # 4. Logarithmic Normalization (Critical for Neural Networks)
-    # ---------------------------------------------------------   
+    # ---------------------------------------------------------
     return torch.tensor(np.log1p(features), dtype=torch.float)
