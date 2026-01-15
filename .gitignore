@@ -2,5 +2,4 @@
 .vscode/
 lfn_venv/
 __pycache__/
-checkpoints/
 .DS_Store
